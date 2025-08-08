@@ -1,3 +1,77 @@
+<?php
+
+use Illuminate\Auth\Events\Lockout;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Session;
+use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
+use Livewire\Attributes\Layout;
+use Livewire\Attributes\Validate;
+use Livewire\Volt\Component;
+
+new #[Layout('components.layouts.auth')] class extends Component {
+    #[Validate('required|string|email')]
+    public string $email = '';
+
+    #[Validate('required|string')]
+    public string $password = '';
+
+    public bool $remember = false;
+
+    /**
+     * Handle an incoming authentication request.
+     */
+    public function login(): void
+    {
+        $this->validate();
+
+        $this->ensureIsNotRateLimited();
+
+        if (! Auth::attempt(['email' => $this->email, 'password' => $this->password], $this->remember)) {
+            RateLimiter::hit($this->throttleKey());
+
+            throw ValidationException::withMessages([
+                'email' => __('auth.failed'),
+            ]);
+        }
+
+        RateLimiter::clear($this->throttleKey());
+        Session::regenerate();
+
+        $this->redirectIntended(default: route('dashboard', absolute: false), navigate: true);
+    }
+    /**
+     * Ensure the authentication request is not rate limited.
+     */
+    protected function ensureIsNotRateLimited(): void
+    {
+        if (! RateLimiter::tooManyAttempts($this->throttleKey(), 5)) {
+            return;
+        }
+
+        event(new Lockout(request()));
+
+        $seconds = RateLimiter::availableIn($this->throttleKey());
+
+        throw ValidationException::withMessages([
+            'email' => __('auth.throttle', [
+                'seconds' => $seconds,
+                'minutes' => ceil($seconds / 60),
+            ]),
+        ]);
+    }
+
+    /**
+     * Get the authentication rate limiting throttle key.
+     */
+    protected function throttleKey(): string
+    {
+        return Str::transliterate(Str::lower($this->email).'|'.request()->ip());
+    }
+}; ?>
+
 <!DOCTYPE html>
 <html lang="{{ str_replace('_', '-', app()->getLocale()) }}">
     <head>
@@ -9,6 +83,7 @@
         <link rel="icon" href="/favicon.ico" sizes="any">
         <link rel="icon" href="/favicon.svg" type="image/svg+xml">
         <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+        <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-EVSTQN3/azprG1Anm3QDgpJLIm9Nao0Yz1ztcQTwFspd3yD65VohhpuuCOmLASjC" crossorigin="anonymous">
 
         <!-- Fonts -->
         <link rel="preconnect" href="https://fonts.bunny.net">
@@ -29,9 +104,9 @@
             }
 
             .login-box {
-                background: url(https://i.imgur.com/73BxBuI.png);
-                background-size: cover;
-                background-position: center;
+                /* background: url({{ asset('img/fondo.png') }}); */
+                /* background-size: cover;
+                background-position: center; */
                 padding: 50px;
                 margin: 50px auto;
                 min-height: 700px;
@@ -48,7 +123,7 @@
             }
 
             .logo .logo-font {
-                color: #3BC3FF;
+                color: #ffffff;
             }
 
             @media only screen and (max-width: 767px) {
@@ -122,36 +197,53 @@
             .carousel-indicators li {
                 cursor: pointer;
             }
+
+            .gradient-custom {
+                /* fallback for old browsers */
+                background: #001580;
+            
+                /* Chrome 10-25, Safari 5.1-6 */
+                background: -webkit-linear-gradient(to right, rgba(0,21,128,1), rgba(37,117,252,1));
+            
+                /* W3C, IE 10+/ Edge, Firefox 16+, Chrome 26+, Opera 12+, Safari 7+ */
+                background: linear-gradient(to right, rgba(0,21,128,1), rgba(37,117,252,1))
+            }
         </style>
     </head>
     <body class="">
         <section class="body">
             <div class="container">
-                <div class="login-box">
+                <div class="login-box gradient-custom">
                     <div class="row">
-                        <div class="col-sm-6">
-                            <div class="logo">
-                                <span class="logo-font">Go</span>Snippets
-                            </div>
+                        <div class="col-sm-6 text-center">
+                            <img src="{{ asset('img/logo.png') }}">
                         </div>
                     </div>
                     <div class="row">
                         <div class="col-sm-6">
                             <br>
-                            <h3 class="header-title">LOGIN</h3>
-                            <form class="login-form">
-                                <div class="form-group">
-                                    <input type="text" class="form-control" placeholder="Email or UserName">
+                            <div class="logo">
+                                <span class="logo-font">Bienvenidos</span>
+                            </div>
+                            <x-auth-session-status class="text-center" :status="session('status')" />
+                            <form class="login-form" wire:submit="login">
+                                <div class="">
+                                    {{-- <input type="text" class="form-control" placeholder="Correo"> --}}
+                                    <flux:input wire:model="email" type="email" required autofocus autocomplete="email" placeholder="email@example.com"/>
                                 </div>
-                                <div class="form-group">
-                                    <input type="Password" class="form-control" placeholder="Password">
-                                    <a href="#!" class="forgot-password">Forgot Password?</a>
+                                <div class="relative mt-4">
+                                    <flux:input
+                                        wire:model="password"
+                                        type="password"
+                                        required
+                                        autocomplete="current-password"
+                                        :placeholder="__('Password')"
+                                    />
                                 </div>
-                                <div class="form-group">
-                                    <button class="btn btn-primary btn-block">LOGIN</button>
-                                </div>
-                                <div class="form-group">
-                                    <div class="text-center">New Member? <a href="#!">Sign up Now</a></div>
+                                <div class="form-group mt-4">
+                                    <input type="submit" value="Ingresar" class="btn btn-danger btn-block">
+                                    <flux:button variant="primary" type="submit" class="w-full">{{ __('Log in') }}</flux:button>
+                                    {{-- <button class="btn btn-danger btn-block">Ingresar</button> --}}
                                 </div>
                             </form>
                         </div>
@@ -166,9 +258,10 @@
                                 <div class="carousel-inner">
                                     <div class="carousel-item active">
                                         <div class="slider-feature-card">
-                                            <img src="https://i.imgur.com/YMn8Xo1.png" alt="">
-                                            <h3 class="slider-title">Title Here</h3>
-                                            <p class="slider-description">Lorem ipsum dolor sit amet, consectetur adipisicing elit. Iure, odio!</p>
+                                            <a href="" data-bs-toggle="modal" data-bs-target="#staticBackdrop"><img src="{{ asset('img/boton_registro.png') }}" alt=""></a>
+                                            {{-- <button type="button" class="" data-bs-toggle="modal" data-bs-target="#staticBackdrop"><img src="{{ asset('img/REGISTRO-01.png') }}" alt=""></button> --}}
+                                            <a href="" data-bs-toggle="modal" data-bs-target="#staticBackdrop"><h3 class="slider-title">Registrate Aqui</h3></a>
+                                            <p class="slider-description">Registro de Militantes del Movimiento Somos Venezuela.</p>
                                         </div>
                                     </div>
                                     <div class="carousel-item">
@@ -194,5 +287,26 @@
         </section>
     </body>
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.5.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.7/dist/js/bootstrap.bundle.min.js" integrity="sha384-ndDqU0Gzau9qJ1lfW4pNLlhNTkCfHzAVBReH9diLvGRem5+R9g2FzA8ZGN954O5Q" crossorigin="anonymous"></script>
+    {{-- <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.5.2/dist/js/bootstrap.bundle.min.js"></script> --}}
+
+    <!-- Modal -->
+    <div class="modal fade" id="staticBackdrop" data-bs-backdrop="static" data-bs-keyboard="false" tabindex="-1" aria-labelledby="staticBackdropLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+        <div class="modal-header">
+            <h5 class="modal-title" id="staticBackdropLabel">Modal title</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+            ...
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            <button type="button" class="btn btn-primary">Understood</button>
+        </div>
+        </div>
+    </div>
+    </div>
+
 </html>
